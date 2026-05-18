@@ -5,13 +5,15 @@ import (
 	"context"
 	"encoding/binary"
 	"io"
+	"strconv"
 	"strings"
 
+	dockertypes "github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
 )
 
 // ContainerLogsStream opens a streaming log reader for one stream type.
-// stdoutOnly/stderrOnly selects which multiplexed stream to expose.
 func (cl *Client) ContainerLogsStream(ctx context.Context, id string, stdout, stderr bool) (io.ReadCloser, error) {
 	opts := container.LogsOptions{
 		ShowStdout: stdout,
@@ -55,10 +57,7 @@ type demuxReader struct {
 func (d *demuxReader) Read(p []byte) (int, error) {
 	for {
 		if d.remain > 0 {
-			n := d.remain
-			if n > len(p) {
-				n = len(p)
-			}
+			n := min(d.remain, len(p))
 			if len(d.buf) < n {
 				d.buf = make([]byte, n)
 			}
@@ -78,8 +77,19 @@ func (d *demuxReader) Read(p []byte) (int, error) {
 func (d *demuxReader) Close() error { return d.src.Close() }
 
 // ServiceLogsStreamTagged opens a streaming log reader for a Swarm service.
-// Each log line is prefixed with [slot] extracted from com.docker.swarm.task.name.
+// Pre-fetches task list to build taskID→slot map; each log line is prefixed [slot].
 func (cl *Client) ServiceLogsStreamTagged(ctx context.Context, serviceID string, stdout, stderr bool) (io.ReadCloser, error) {
+	tasks, err := cl.c.TaskList(ctx, dockertypes.TaskListOptions{
+		Filters: filters.NewArgs(filters.Arg("service", serviceID)),
+	})
+	if err != nil {
+		return nil, MapErr(err, "TaskList/slots")
+	}
+	slotByTaskID := make(map[string]int, len(tasks))
+	for _, t := range tasks {
+		slotByTaskID[t.ID] = t.Slot
+	}
+
 	opts := container.LogsOptions{
 		ShowStdout: stdout,
 		ShowStderr: stderr,
@@ -90,14 +100,15 @@ func (cl *Client) ServiceLogsStreamTagged(ctx context.Context, serviceID string,
 	if err != nil {
 		return nil, MapErr(err, "ServiceLogs")
 	}
-	return &taggedServiceLogReader{src: rc}, nil
+	return &taggedServiceLogReader{src: rc, slotByTaskID: slotByTaskID}, nil
 }
 
 // taggedServiceLogReader reads Docker service logs with Details:true and
-// prepends [slot] to each frame using com.docker.swarm.task.name.
+// prepends [slot] to each line using a pre-fetched taskID→slot map.
 type taggedServiceLogReader struct {
-	src    io.ReadCloser
-	outBuf []byte
+	src          io.ReadCloser
+	slotByTaskID map[string]int
+	outBuf       []byte
 }
 
 func (r *taggedServiceLogReader) Read(p []byte) (int, error) {
@@ -114,7 +125,7 @@ func (r *taggedServiceLogReader) Read(p []byte) (int, error) {
 		if _, err := io.ReadFull(r.src, frame); err != nil {
 			return 0, err
 		}
-		r.outBuf = tagServiceFrame(frame)
+		r.outBuf = r.tagFrame(frame)
 	}
 	n := copy(p, r.outBuf)
 	r.outBuf = r.outBuf[n:]
@@ -123,13 +134,13 @@ func (r *taggedServiceLogReader) Read(p []byte) (int, error) {
 
 func (r *taggedServiceLogReader) Close() error { return r.src.Close() }
 
-// tagServiceFrame parses "key=val,key2=val2 logline" and returns "[slot] logline".
-func tagServiceFrame(frame []byte) []byte {
+// tagFrame parses "key=val,key2=val2 logline" and returns "[slot] logline".
+func (r *taggedServiceLogReader) tagFrame(frame []byte) []byte {
 	idx := bytes.IndexByte(frame, ' ')
 	if idx < 0 {
 		return frame
 	}
-	slot := extractTaskSlot(string(frame[:idx]))
+	slot := r.slotFromAttrs(string(frame[:idx]))
 	out := make([]byte, 0, 4+len(slot)+len(frame)-idx)
 	out = append(out, '[')
 	out = append(out, slot...)
@@ -138,17 +149,21 @@ func tagServiceFrame(frame []byte) []byte {
 	return out
 }
 
-// extractTaskSlot parses com.docker.swarm.task.name=svcname.slot from attrs.
-func extractTaskSlot(attrs string) string {
-	for _, kv := range strings.Split(attrs, ",") {
-		v, ok := strings.CutPrefix(kv, "com.docker.swarm.task.name=")
+// slotFromAttrs extracts slot from com.docker.swarm.task.id= using pre-fetched map.
+func (r *taggedServiceLogReader) slotFromAttrs(attrs string) string {
+	for kv := range strings.SplitSeq(attrs, ",") {
+		taskID, ok := strings.CutPrefix(kv, "com.docker.swarm.task.id=")
 		if !ok {
 			continue
 		}
-		if i := strings.LastIndex(v, "."); i >= 0 {
-			return v[i+1:]
+		if slot, found := r.slotByTaskID[taskID]; found {
+			return strconv.Itoa(slot)
 		}
-		return v
+		// task started after prefetch — fall back to short ID
+		if len(taskID) >= 6 {
+			return taskID[:6]
+		}
+		return taskID
 	}
 	return "?"
 }
