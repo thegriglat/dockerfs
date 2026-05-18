@@ -11,11 +11,11 @@ dockerfs/
   internal/
     docker/
       client.go                 Client wrapper: New(), Ping(), Raw(), MapErr()
-      streams.go                ContainerLogsStream, ContainerLogsOnce, ServiceLogsStream,
-                                demuxReader (strips 8-byte Docker multiplex header)
+      streams.go                ContainerLogsStream, ContainerLogsOnce, ServiceLogsStreamTagged,
+                                demuxReader, taggedServiceLogReader
     fs/
       root.go                   Root node (/), FS type, routes to /local and /swarm
-      local.go                  /local/containers/<name>/{env,inspect,stdout,stderr,stats}
+      local.go                  /local/containers/<name>/{env,inspect,logs,stdout,stderr,stats}
       swarm.go                  /swarm/services, /swarm/nodes, /swarm/jobs
   go.mod / go.sum
 ```
@@ -33,8 +33,8 @@ dockerfs/
 |---|---|---|
 | `StaticFile` | local.go | Fetches once on Open(), serves buffer with offset |
 | `StreamFile` | local.go | Opens Follow:true log stream; Release() closes it |
-| `StatsFile` | local.go | Fresh ContainerStats fetch on every Read() |
-| `ServiceLogsFile` | swarm.go | Like StreamFile but calls ServiceLogs |
+| `StatsFile` | local.go | ContainerStats(stream:true), reads first frame only — avoids ~1s daemon wait |
+| `ServiceStreamFile` | swarm.go | Like StreamFile but calls ServiceLogs with Details:true; prefixes each line with [slot] |
 
 All Dir nodes implement `fs.Node + fs.HandleReadDirAller + fs.NodeStringLookuper`.
 
@@ -90,6 +90,12 @@ mkdir -p ~/mnt/dockerfs
 # unmount
 fusermount3 -u ~/mnt/dockerfs
 ```
+
+## Known tool limitations
+
+- `tail -f` does not work on streaming files — FUSE emits no inotify events; use `cat` instead
+- `grep` on a streaming file blocks until interrupted; pipe through `head` or use `grep ... | head -N`
+- `cat` on streaming files does not exit (Follow:true has no EOF while container runs)
 
 ## What is NOT implemented
 

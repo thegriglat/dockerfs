@@ -119,6 +119,7 @@ func (d *ContainerDir) Attr(ctx context.Context, a *fuse.Attr) error {
 var containerFiles = []fuse.Dirent{
 	{Name: "env", Type: fuse.DT_File},
 	{Name: "inspect", Type: fuse.DT_File},
+	{Name: "logs", Type: fuse.DT_File},
 	{Name: "stdout", Type: fuse.DT_File},
 	{Name: "stderr", Type: fuse.DT_File},
 	{Name: "stats", Type: fuse.DT_File},
@@ -138,6 +139,8 @@ func (d *ContainerDir) Lookup(ctx context.Context, name string) (fs.Node, error)
 		return &StaticFile{fetch: func(ctx context.Context) ([]byte, error) {
 			return fetchInspect(ctx, d.cl, d.id)
 		}}, nil
+	case "logs":
+		return &StreamFile{cl: d.cl, id: d.id, stdout: true, stderr: true}, nil
 	case "stdout":
 		return &StreamFile{cl: d.cl, id: d.id, stdout: true, stderr: false}, nil
 	case "stderr":
@@ -352,7 +355,7 @@ type statsOutput struct {
 }
 
 func fetchStats(ctx context.Context, cl *docker.Client, id string) ([]byte, error) {
-	resp, err := cl.Raw().ContainerStats(ctx, id, false)
+	resp, err := cl.Raw().ContainerStats(ctx, id, true)
 	if err != nil {
 		return nil, docker.MapErr(err, "ContainerStats")
 	}

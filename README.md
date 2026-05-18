@@ -1,6 +1,6 @@
 # dockerfs
 
-A read-only FUSE filesystem that exposes Docker containers, Swarm services, nodes, and jobs as a directory tree. Inspect running containers, stream logs, and browse Swarm topology using ordinary shell tools — `cat`, `tail`, `grep`, `watch`.
+A read-only FUSE filesystem that exposes Docker containers, Swarm services, nodes, and jobs as a directory tree. Inspect running containers, stream logs, and browse Swarm topology using ordinary shell tools — `cat`, `grep`, `watch`.
 
 ```
 /mnt/dockerfs/
@@ -9,14 +9,17 @@ A read-only FUSE filesystem that exposes Docker containers, Swarm services, node
 │       └── <name>/
 │           ├── env        KEY=VALUE lines from container environment
 │           ├── inspect    raw JSON from docker inspect
-│           ├── stdout     live log stream (Follow: true)
+│           ├── logs       live combined log stream (stdout + stderr)
+│           ├── stdout     live stdout stream
 │           ├── stderr     live stderr stream
 │           └── stats      JSON snapshot refreshed on every read
 └── swarm/                 empty if Swarm is not active
     ├── services/
     │   └── <name>/
     │       ├── status     human-readable replicas/image/update info
-    │       ├── logs       aggregated log stream from all replicas
+    │       ├── logs       aggregated log stream from all replicas (prefixed [slot])
+    │       ├── stdout     stdout only, prefixed [slot]
+    │       ├── stderr     stderr only, prefixed [slot]
     │       └── replicas/
     │           └── <name.N>/
     │               ├── stdout
@@ -82,7 +85,7 @@ fusermount3 -u ~/mnt/dockerfs
 
 ```bash
 # Stream stdout from a running container
-tail -f ~/mnt/dockerfs/local/containers/nginx/stdout
+cat ~/mnt/dockerfs/local/containers/nginx/stdout
 
 # Watch CPU and memory usage
 watch -n1 cat ~/mnt/dockerfs/local/containers/nginx/stats
@@ -93,7 +96,10 @@ cat ~/mnt/dockerfs/local/containers/postgres/env
 # Full docker inspect as JSON
 cat ~/mnt/dockerfs/local/containers/myapp/inspect | jq .State
 
-# Search for errors across all containers
+# Search for errors in stdout
+grep ERROR ~/mnt/dockerfs/local/containers/myapp/stdout
+
+# Search across all containers (reads historical logs)
 grep -h ERROR ~/mnt/dockerfs/local/containers/*/stdout
 ```
 
@@ -103,8 +109,11 @@ grep -h ERROR ~/mnt/dockerfs/local/containers/*/stdout
 # Watch replica counts
 watch -n2 cat ~/mnt/dockerfs/swarm/services/nginx/status
 
-# Stream aggregated logs from all replicas
-tail -f ~/mnt/dockerfs/swarm/services/api/logs
+# Stream aggregated logs from all replicas with [slot] prefix
+cat ~/mnt/dockerfs/swarm/services/api/logs
+
+# Stream only stderr from all replicas
+cat ~/mnt/dockerfs/swarm/services/api/stderr
 
 # Check which node a specific replica runs on
 cat ~/mnt/dockerfs/swarm/services/api/replicas/api.1/node
@@ -144,24 +153,37 @@ for d in ~/mnt/dockerfs/swarm/jobs/*/; do
 done
 ```
 
+## Known limitations
+
+- **`tail -f` does not work** on streaming files (`stdout`, `stderr`, `logs`). FUSE does not emit inotify events, so `tail -f` either blocks in pipe mode waiting for EOF (which never comes) or waits for inotify events that never fire. Use `cat` instead — it reads the live stream directly.
+- **`grep` on streaming files blocks** until the process is killed (e.g. `grep pattern .../stdout | head -20` works; plain `grep` without `head` runs until interrupted).
+- **`cat` on streaming files does not exit** — the log stream uses `Follow: true` and has no EOF while the container runs. Kill with Ctrl-C or pipe through `head`.
+- **No writes** — the filesystem is fully read-only.
+- **No mmap support**.
+- **`/swarm/nodes/<name>/containers`** — not implemented (TODO).
+- **Docker secrets** — not exposed.
+
 ## Architecture
 
 Every path maps to a FUSE node implementing `bazil.org/fuse/fs`:
 
 ```
-Node type      Interfaces implemented
+Node type          Interfaces implemented
 ─────────────────────────────────────────────────────────────────
-Dir nodes      fs.Node, fs.HandleReadDirAller, fs.NodeStringLookuper
-StaticFile     fs.Node, fs.NodeOpener → staticHandle (buffer + offset)
-StreamFile     fs.Node, fs.NodeOpener → streamHandle (io.ReadCloser)
-StatsFile      fs.Node, fs.NodeOpener → statsHandle  (fresh fetch per read)
+Dir nodes          fs.Node, fs.HandleReadDirAller, fs.NodeStringLookuper
+StaticFile         fs.Node, fs.NodeOpener → staticHandle (buffer + offset)
+StreamFile         fs.Node, fs.NodeOpener → streamHandle (io.ReadCloser)
+ServiceStreamFile  fs.Node, fs.NodeOpener → streamHandle (tagged with [slot])
+StatsFile          fs.Node, fs.NodeOpener → statsHandle  (fresh fetch per read)
 ```
 
 **Static files** (`env`, `inspect`, `status`, `labels`, `node`) fetch data once on `Open()` and serve from an in-memory buffer with correct offset handling. No caching between `Open()` calls.
 
 **Streaming files** (`stdout`, `stderr`, `logs`) call `ContainerLogs` or `ServiceLogs` with `Follow: true` on `Open()`. Each `Read()` returns the next chunk from the stream. `Release()` cancels the context and closes the reader.
 
-**Stats files** make a fresh `ContainerStats(oneShot: true)` request on every `Read()` and compute:
+**Service streaming files** are the same but enable `Details: true` in the API call. Each frame's `com.docker.swarm.task.name` attribute is parsed and replaced with a `[slot]` prefix on the log line.
+
+**Stats files** make a fresh `ContainerStats(stream: true)` request on every `Read()`, read the first JSON frame, then close. CPU is computed as:
 
 ```
 cpu_percent = (cpuDelta / systemDelta) × numCPUs × 100
@@ -176,15 +198,6 @@ Docker's multiplexed log stream (8-byte frame header) is stripped transparently 
 | Container / service / node not found | `ENOENT`   |
 | Swarm not active                     | `EPERM`    |
 | Network / API error                  | `EIO`      |
-
-## What is not implemented
-
-- Any writes (the filesystem is fully read-only)
-- `/swarm/nodes/<name>/containers` — TODO
-- Docker secrets
-- `mmap`
-- Cross-`Read()` caching (except the open stream handle)
-- Hard links
 
 ## License
 

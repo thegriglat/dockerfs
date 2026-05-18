@@ -128,6 +128,8 @@ func (d *ServiceDir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 	return []fuse.Dirent{
 		{Name: "status", Type: fuse.DT_File},
 		{Name: "logs", Type: fuse.DT_File},
+		{Name: "stdout", Type: fuse.DT_File},
+		{Name: "stderr", Type: fuse.DT_File},
 		{Name: "replicas", Type: fuse.DT_Dir},
 	}, nil
 }
@@ -139,7 +141,11 @@ func (d *ServiceDir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 			return fetchServiceStatus(ctx, d.cl, d.id)
 		}}, nil
 	case "logs":
-		return &ServiceLogsFile{cl: d.cl, id: d.id}, nil
+		return &ServiceStreamFile{cl: d.cl, id: d.id, stdout: true, stderr: true}, nil
+	case "stdout":
+		return &ServiceStreamFile{cl: d.cl, id: d.id, stdout: true, stderr: false}, nil
+	case "stderr":
+		return &ServiceStreamFile{cl: d.cl, id: d.id, stdout: false, stderr: true}, nil
 	case "replicas":
 		return &ReplicasDir{cl: d.cl, serviceID: d.id, serviceName: d.name}, nil
 	}
@@ -187,24 +193,26 @@ func fetchServiceStatus(ctx context.Context, cl *docker.Client, id string) ([]by
 	return []byte(out), nil
 }
 
-// ---- ServiceLogsFile -------------------------------------------------------
+// ---- ServiceStreamFile -----------------------------------------------------
 
-type ServiceLogsFile struct {
-	cl *docker.Client
-	id string
+type ServiceStreamFile struct {
+	cl     *docker.Client
+	id     string
+	stdout bool
+	stderr bool
 }
 
-var _ fs.Node = (*ServiceLogsFile)(nil)
-var _ fs.NodeOpener = (*ServiceLogsFile)(nil)
+var _ fs.Node = (*ServiceStreamFile)(nil)
+var _ fs.NodeOpener = (*ServiceStreamFile)(nil)
 
-func (f *ServiceLogsFile) Attr(ctx context.Context, a *fuse.Attr) error {
+func (f *ServiceStreamFile) Attr(ctx context.Context, a *fuse.Attr) error {
 	a.Mode = 0o444
 	return nil
 }
 
-func (f *ServiceLogsFile) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
+func (f *ServiceStreamFile) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
 	streamCtx, cancel := context.WithCancel(context.Background())
-	rc, err := f.cl.ServiceLogsStream(streamCtx, f.id)
+	rc, err := f.cl.ServiceLogsStreamTagged(streamCtx, f.id, f.stdout, f.stderr)
 	if err != nil {
 		cancel()
 		return nil, err
