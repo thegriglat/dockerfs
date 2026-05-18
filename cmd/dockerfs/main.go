@@ -17,7 +17,7 @@ import (
 )
 
 func main() {
-	mountpoint := pflag.StringP("mountpoint", "m", "/mnt/dockerfs", "FUSE mount point")
+	mountpoint := pflag.StringP("mountpoint", "m", "", "FUSE mount point")
 	debug := pflag.BoolP("debug", "v", false, "enable FUSE debug logging")
 	allowOther := pflag.BoolP("allow-other", "o", false, "allow other users to access the mountpoint\n(requires user_allow_other in /etc/fuse.conf)")
 	daemon := pflag.BoolP("daemon", "d", false, "detach and run in background")
@@ -25,6 +25,16 @@ func main() {
 	child := pflag.Bool("child", false, "")
 	pflag.CommandLine.MarkHidden("child")
 	pflag.Parse()
+
+	if !*child && pflag.NFlag() == 0 {
+		pflag.Usage()
+		os.Exit(0)
+	}
+
+	if *mountpoint == "" {
+		slog.Error("--mountpoint is required")
+		os.Exit(1)
+	}
 
 	if *daemon && !*child {
 		daemonize()
