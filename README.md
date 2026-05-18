@@ -16,12 +16,15 @@ A read-only FUSE filesystem that exposes Docker containers, Swarm services, node
 └── swarm/                 empty if Swarm is not active
     ├── services/
     │   └── <name>/
+    │       ├── inspect    raw service JSON
     │       ├── status     human-readable replicas/image/update info
     │       ├── logs       aggregated log stream from all replicas (prefixed [slot])
     │       ├── stdout     stdout only, prefixed [slot]
     │       ├── stderr     stderr only, prefixed [slot]
     │       └── replicas/
     │           └── <name.N>/
+    │               ├── env    KEY=VALUE lines from container environment
+    │               ├── inspect raw task JSON
     │               ├── logs   live combined stream (stdout + stderr)
     │               ├── stdout live stdout stream
     │               ├── stderr live stderr stream
@@ -29,20 +32,25 @@ A read-only FUSE filesystem that exposes Docker containers, Swarm services, node
     │               └── node   hostname of the node running this replica
     ├── nodes/
     │   └── <hostname>/
+    │       ├── inspect    raw node JSON
     │       ├── status     role, availability, state, addr, engine version
     │       ├── labels     KEY=VALUE lines from node labels
     │       └── containers/
-    │           └── <name.N>/
-    │               ├── logs   live combined stream (stdout + stderr)
-    │               ├── stdout live stdout stream
-    │               ├── stderr live stderr stream
+    │           └── <name.N>/   (same layout as replicas/<name.N>)
+    │               ├── env
+    │               ├── inspect
+    │               ├── logs
+    │               ├── stdout
+    │               ├── stderr
     │               ├── stats
-    │               └── node   hostname of the node running this replica
+    │               └── node
     └── jobs/
         └── <name>/
+            ├── inspect    raw task JSON
             ├── status     id, state, exit_code, error
-            ├── logs       completed output (non-blocking)
-            └── inspect    raw task JSON
+            ├── logs       completed output (non-blocking, stdout + stderr)
+            ├── stdout     completed stdout (non-blocking)
+            └── stderr     completed stderr (non-blocking)
 ```
 
 ## Requirements

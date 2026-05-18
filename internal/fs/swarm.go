@@ -126,6 +126,7 @@ func (d *ServiceDir) Attr(ctx context.Context, a *fuse.Attr) error {
 
 func (d *ServiceDir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 	return []fuse.Dirent{
+		{Name: "inspect", Type: fuse.DT_File},
 		{Name: "status", Type: fuse.DT_File},
 		{Name: "logs", Type: fuse.DT_File},
 		{Name: "stdout", Type: fuse.DT_File},
@@ -136,6 +137,10 @@ func (d *ServiceDir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 
 func (d *ServiceDir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 	switch name {
+	case "inspect":
+		return &StaticFile{fetch: func(ctx context.Context) ([]byte, error) {
+			return fetchServiceInspect(ctx, d.cl, d.id)
+		}}, nil
 	case "status":
 		return &StaticFile{fetch: func(ctx context.Context) ([]byte, error) {
 			return fetchServiceStatus(ctx, d.cl, d.id)
@@ -150,6 +155,18 @@ func (d *ServiceDir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 		return &ReplicasDir{cl: d.cl, serviceID: d.id, serviceName: d.name}, nil
 	}
 	return nil, fuse.ENOENT
+}
+
+func fetchServiceInspect(ctx context.Context, cl *docker.Client, id string) ([]byte, error) {
+	svc, _, err := cl.Raw().ServiceInspectWithRaw(ctx, id, dockertypes.ServiceInspectOptions{})
+	if err != nil {
+		return nil, docker.MapErr(err, "ServiceInspect")
+	}
+	raw, err := json.MarshalIndent(svc, "", "  ")
+	if err != nil {
+		return nil, fuse.EIO
+	}
+	return append(raw, '\n'), nil
 }
 
 func fetchServiceStatus(ctx context.Context, cl *docker.Client, id string) ([]byte, error) {
@@ -298,6 +315,8 @@ func (d *ReplicaDir) Attr(ctx context.Context, a *fuse.Attr) error {
 
 func (d *ReplicaDir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 	return []fuse.Dirent{
+		{Name: "env", Type: fuse.DT_File},
+		{Name: "inspect", Type: fuse.DT_File},
 		{Name: "logs", Type: fuse.DT_File},
 		{Name: "stdout", Type: fuse.DT_File},
 		{Name: "stderr", Type: fuse.DT_File},
@@ -310,6 +329,20 @@ func (d *ReplicaDir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 	cid := d.task.Status.ContainerStatus.ContainerID
 	nodeID := d.task.NodeID
 	switch name {
+	case "env":
+		env := d.task.Spec.ContainerSpec.Env
+		return &StaticFile{fetch: func(ctx context.Context) ([]byte, error) {
+			return []byte(strings.Join(env, "\n") + "\n"), nil
+		}}, nil
+	case "inspect":
+		t := d.task
+		return &StaticFile{fetch: func(ctx context.Context) ([]byte, error) {
+			raw, err := json.MarshalIndent(t, "", "  ")
+			if err != nil {
+				return nil, fuse.EIO
+			}
+			return append(raw, '\n'), nil
+		}}, nil
 	case "logs":
 		return &StreamFile{cl: d.cl, id: cid, stdout: true, stderr: true}, nil
 	case "stdout":
@@ -390,6 +423,7 @@ func (d *NodeDir) Attr(ctx context.Context, a *fuse.Attr) error {
 
 func (d *NodeDir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 	return []fuse.Dirent{
+		{Name: "inspect", Type: fuse.DT_File},
 		{Name: "status", Type: fuse.DT_File},
 		{Name: "labels", Type: fuse.DT_File},
 		{Name: "containers", Type: fuse.DT_Dir},
@@ -399,6 +433,10 @@ func (d *NodeDir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 func (d *NodeDir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 	id := d.node.ID
 	switch name {
+	case "inspect":
+		return &StaticFile{fetch: func(ctx context.Context) ([]byte, error) {
+			return fetchNodeInspect(ctx, d.cl, id)
+		}}, nil
 	case "status":
 		return &StaticFile{fetch: func(ctx context.Context) ([]byte, error) {
 			return fetchNodeStatus(ctx, d.cl, id)
@@ -481,6 +519,18 @@ func (d *NodeContainersDir) Lookup(ctx context.Context, name string) (fs.Node, e
 		}
 	}
 	return nil, fuse.ENOENT
+}
+
+func fetchNodeInspect(ctx context.Context, cl *docker.Client, id string) ([]byte, error) {
+	n, _, err := cl.Raw().NodeInspectWithRaw(ctx, id)
+	if err != nil {
+		return nil, docker.MapErr(err, "NodeInspect")
+	}
+	raw, err := json.MarshalIndent(n, "", "  ")
+	if err != nil {
+		return nil, fuse.EIO
+	}
+	return append(raw, '\n'), nil
 }
 
 func fetchNodeStatus(ctx context.Context, cl *docker.Client, id string) ([]byte, error) {
@@ -593,9 +643,11 @@ func (d *JobDir) Attr(ctx context.Context, a *fuse.Attr) error {
 
 func (d *JobDir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 	return []fuse.Dirent{
+		{Name: "inspect", Type: fuse.DT_File},
 		{Name: "status", Type: fuse.DT_File},
 		{Name: "logs", Type: fuse.DT_File},
-		{Name: "inspect", Type: fuse.DT_File},
+		{Name: "stdout", Type: fuse.DT_File},
+		{Name: "stderr", Type: fuse.DT_File},
 	}, nil
 }
 
@@ -603,6 +655,14 @@ func (d *JobDir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 	t := d.task
 	cid := t.Status.ContainerStatus.ContainerID
 	switch name {
+	case "inspect":
+		return &StaticFile{fetch: func(ctx context.Context) ([]byte, error) {
+			raw, err := json.MarshalIndent(t, "", "  ")
+			if err != nil {
+				return nil, fuse.EIO
+			}
+			return append(raw, '\n'), nil
+		}}, nil
 	case "status":
 		return &StaticFile{fetch: func(ctx context.Context) ([]byte, error) {
 			return fetchJobStatus(t), nil
@@ -611,13 +671,13 @@ func (d *JobDir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 		return &StaticFile{fetch: func(ctx context.Context) ([]byte, error) {
 			return d.cl.ContainerLogsOnce(ctx, cid, true, true)
 		}}, nil
-	case "inspect":
+	case "stdout":
 		return &StaticFile{fetch: func(ctx context.Context) ([]byte, error) {
-			raw, err := json.MarshalIndent(t, "", "  ")
-			if err != nil {
-				return nil, fuse.EIO
-			}
-			return append(raw, '\n'), nil
+			return d.cl.ContainerLogsOnce(ctx, cid, true, false)
+		}}, nil
+	case "stderr":
+		return &StaticFile{fetch: func(ctx context.Context) ([]byte, error) {
+			return d.cl.ContainerLogsOnce(ctx, cid, false, true)
 		}}, nil
 	}
 	return nil, fuse.ENOENT
