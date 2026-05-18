@@ -1,0 +1,20 @@
+# build output
+dockerfs
+/cmd/dockerfs/dockerfs
+
+# test binary
+*.test
+
+# coverage
+*.out
+coverage.html
+
+# editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
