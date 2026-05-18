@@ -100,7 +100,7 @@ fusermount3 -u ~/mnt/dockerfs
 ## What is NOT implemented
 
 - Any writes — fully read-only
-- `/swarm/nodes/<name>/containers` — TODO
+- `/swarm/nodes/<name>/containers/<service.N>/{stdout,stats,node}` — replicas running on this node
 - docker secrets
 - mmap
 - caching between Read() calls (except the open stream handle)

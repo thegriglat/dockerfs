@@ -28,7 +28,12 @@ A read-only FUSE filesystem that exposes Docker containers, Swarm services, node
     ├── nodes/
     │   └── <hostname>/
     │       ├── status     role, availability, state, addr, engine version
-    │       └── labels     KEY=VALUE lines from node labels
+    │       ├── labels     KEY=VALUE lines from node labels
+    │       └── containers/
+    │           └── <name.N>/
+    │               ├── stdout
+    │               ├── stats
+    │               └── node   hostname of the node running this replica
     └── jobs/
         └── <name>/
             ├── status     id, state, exit_code, error
@@ -133,6 +138,15 @@ cat ~/mnt/dockerfs/swarm/nodes/worker-1/status
 
 # View node labels
 cat ~/mnt/dockerfs/swarm/nodes/worker-1/labels
+
+# List all replicas running on a node
+ls ~/mnt/dockerfs/swarm/nodes/worker-1/containers/
+
+# Stream stdout from a specific replica on that node
+cat ~/mnt/dockerfs/swarm/nodes/worker-1/containers/api.2/stdout
+
+# Live stats for all replicas on a node
+watch -n1 'for d in ~/mnt/dockerfs/swarm/nodes/worker-1/containers/*/; do echo "=== $(basename $d) ==="; cat "$d/stats"; done'
 ```
 
 ### Swarm jobs
@@ -160,7 +174,6 @@ done
 - **`cat` on streaming files does not exit** — the log stream uses `Follow: true` and has no EOF while the container runs. Kill with Ctrl-C or pipe through `head`.
 - **No writes** — the filesystem is fully read-only.
 - **No mmap support**.
-- **`/swarm/nodes/<name>/containers`** — not implemented (TODO).
 - **Docker secrets** — not exposed.
 
 ## Architecture

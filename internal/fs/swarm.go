@@ -386,6 +386,7 @@ func (d *NodeDir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 	return []fuse.Dirent{
 		{Name: "status", Type: fuse.DT_File},
 		{Name: "labels", Type: fuse.DT_File},
+		{Name: "containers", Type: fuse.DT_Dir},
 	}, nil
 }
 
@@ -400,6 +401,78 @@ func (d *NodeDir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 		return &StaticFile{fetch: func(ctx context.Context) ([]byte, error) {
 			return fetchNodeLabels(ctx, d.cl, id)
 		}}, nil
+	case "containers":
+		return &NodeContainersDir{cl: d.cl, nodeID: id}, nil
+	}
+	return nil, fuse.ENOENT
+}
+
+// ---- /swarm/nodes/<hostname>/containers ------------------------------------
+
+type NodeContainersDir struct {
+	cl     *docker.Client
+	nodeID string
+}
+
+var _ fs.Node = (*NodeContainersDir)(nil)
+var _ fs.HandleReadDirAller = (*NodeContainersDir)(nil)
+var _ fs.NodeStringLookuper = (*NodeContainersDir)(nil)
+
+func (d *NodeContainersDir) Attr(ctx context.Context, a *fuse.Attr) error {
+	a.Mode = os.ModeDir | 0o555
+	return nil
+}
+
+func (d *NodeContainersDir) listNodeReplicas(ctx context.Context) ([]swarm.Task, map[string]string, error) {
+	tasks, err := d.cl.Raw().TaskList(ctx, dockertypes.TaskListOptions{
+		Filters: filters.NewArgs(
+			filters.Arg("node", d.nodeID),
+			filters.Arg("desired-state", "running"),
+		),
+	})
+	if err != nil {
+		return nil, nil, docker.MapErr(err, "TaskList/node-containers")
+	}
+	services, err := d.cl.Raw().ServiceList(ctx, dockertypes.ServiceListOptions{})
+	if err != nil {
+		return nil, nil, docker.MapErr(err, "ServiceList/node-containers")
+	}
+	svcMap := make(map[string]string, len(services))
+	for _, svc := range services {
+		svcMap[svc.ID] = svc.Spec.Name
+	}
+	return tasks, svcMap, nil
+}
+
+func (d *NodeContainersDir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
+	tasks, svcMap, err := d.listNodeReplicas(ctx)
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]fuse.Dirent, 0, len(tasks))
+	for _, t := range tasks {
+		svcName, ok := svcMap[t.ServiceID]
+		if !ok {
+			continue
+		}
+		entries = append(entries, fuse.Dirent{Name: replicaName(svcName, t), Type: fuse.DT_Dir})
+	}
+	return entries, nil
+}
+
+func (d *NodeContainersDir) Lookup(ctx context.Context, name string) (fs.Node, error) {
+	tasks, svcMap, err := d.listNodeReplicas(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range tasks {
+		svcName, ok := svcMap[t.ServiceID]
+		if !ok {
+			continue
+		}
+		if replicaName(svcName, t) == name {
+			return &ReplicaDir{cl: d.cl, task: t}, nil
+		}
 	}
 	return nil, fuse.ENOENT
 }
