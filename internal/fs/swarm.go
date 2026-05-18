@@ -298,7 +298,9 @@ func (d *ReplicaDir) Attr(ctx context.Context, a *fuse.Attr) error {
 
 func (d *ReplicaDir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 	return []fuse.Dirent{
+		{Name: "logs", Type: fuse.DT_File},
 		{Name: "stdout", Type: fuse.DT_File},
+		{Name: "stderr", Type: fuse.DT_File},
 		{Name: "stats", Type: fuse.DT_File},
 		{Name: "node", Type: fuse.DT_File},
 	}, nil
@@ -308,8 +310,12 @@ func (d *ReplicaDir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 	cid := d.task.Status.ContainerStatus.ContainerID
 	nodeID := d.task.NodeID
 	switch name {
-	case "stdout":
+	case "logs":
 		return &StreamFile{cl: d.cl, id: cid, stdout: true, stderr: true}, nil
+	case "stdout":
+		return &StreamFile{cl: d.cl, id: cid, stdout: true, stderr: false}, nil
+	case "stderr":
+		return &StreamFile{cl: d.cl, id: cid, stdout: false, stderr: true}, nil
 	case "stats":
 		return &StatsFile{cl: d.cl, id: cid}, nil
 	case "node":

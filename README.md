@@ -22,7 +22,9 @@ A read-only FUSE filesystem that exposes Docker containers, Swarm services, node
     │       ├── stderr     stderr only, prefixed [slot]
     │       └── replicas/
     │           └── <name.N>/
-    │               ├── stdout
+    │               ├── logs   live combined stream (stdout + stderr)
+    │               ├── stdout live stdout stream
+    │               ├── stderr live stderr stream
     │               ├── stats
     │               └── node   hostname of the node running this replica
     ├── nodes/
@@ -31,7 +33,9 @@ A read-only FUSE filesystem that exposes Docker containers, Swarm services, node
     │       ├── labels     KEY=VALUE lines from node labels
     │       └── containers/
     │           └── <name.N>/
-    │               ├── stdout
+    │               ├── logs   live combined stream (stdout + stderr)
+    │               ├── stdout live stdout stream
+    │               ├── stderr live stderr stream
     │               ├── stats
     │               └── node   hostname of the node running this replica
     └── jobs/
