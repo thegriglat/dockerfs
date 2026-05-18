@@ -120,6 +120,9 @@ var containerFiles = []fuse.Dirent{
 	{Name: "env", Type: fuse.DT_File},
 	{Name: "inspect", Type: fuse.DT_File},
 	{Name: "logs", Type: fuse.DT_File},
+	{Name: "mounts", Type: fuse.DT_File},
+	{Name: "network", Type: fuse.DT_File},
+	{Name: "ports", Type: fuse.DT_File},
 	{Name: "stdout", Type: fuse.DT_File},
 	{Name: "stderr", Type: fuse.DT_File},
 	{Name: "stats", Type: fuse.DT_File},
@@ -141,6 +144,18 @@ func (d *ContainerDir) Lookup(ctx context.Context, name string) (fs.Node, error)
 		}}, nil
 	case "logs":
 		return &StreamFile{cl: d.cl, id: d.id, stdout: true, stderr: true}, nil
+	case "mounts":
+		return &StaticFile{fetch: func(ctx context.Context) ([]byte, error) {
+			return fetchMounts(ctx, d.cl, d.id)
+		}}, nil
+	case "network":
+		return &StaticFile{fetch: func(ctx context.Context) ([]byte, error) {
+			return fetchNetwork(ctx, d.cl, d.id)
+		}}, nil
+	case "ports":
+		return &StaticFile{fetch: func(ctx context.Context) ([]byte, error) {
+			return fetchPorts(ctx, d.cl, d.id)
+		}}, nil
 	case "stdout":
 		return &StreamFile{cl: d.cl, id: d.id, stdout: true, stderr: false}, nil
 	case "stderr":
@@ -157,6 +172,52 @@ func fetchEnv(ctx context.Context, cl *docker.Client, id string) ([]byte, error)
 		return nil, docker.MapErr(err, "ContainerInspect/env")
 	}
 	return []byte(strings.Join(info.Config.Env, "\n") + "\n"), nil
+}
+
+func fetchMounts(ctx context.Context, cl *docker.Client, id string) ([]byte, error) {
+	info, err := cl.Raw().ContainerInspect(ctx, id)
+	if err != nil {
+		return nil, docker.MapErr(err, "ContainerInspect/mounts")
+	}
+	var sb strings.Builder
+	for _, m := range info.Mounts {
+		mode := "rw"
+		if !m.RW {
+			mode = "ro"
+		}
+		fmt.Fprintf(&sb, "%s  %s  %s\n", m.Source, m.Destination, mode)
+	}
+	return []byte(sb.String()), nil
+}
+
+func fetchNetwork(ctx context.Context, cl *docker.Client, id string) ([]byte, error) {
+	info, err := cl.Raw().ContainerInspect(ctx, id)
+	if err != nil {
+		return nil, docker.MapErr(err, "ContainerInspect/network")
+	}
+	var sb strings.Builder
+	for name, ep := range info.NetworkSettings.Networks {
+		fmt.Fprintf(&sb, "%-20s %s\n", name, ep.IPAddress)
+	}
+	return []byte(sb.String()), nil
+}
+
+func fetchPorts(ctx context.Context, cl *docker.Client, id string) ([]byte, error) {
+	info, err := cl.Raw().ContainerInspect(ctx, id)
+	if err != nil {
+		return nil, docker.MapErr(err, "ContainerInspect/ports")
+	}
+	var sb strings.Builder
+	for containerPort, bindings := range info.NetworkSettings.Ports {
+		if len(bindings) == 0 {
+			fmt.Fprintf(&sb, "%s\n", containerPort)
+			continue
+		}
+		for _, b := range bindings {
+			fmt.Fprintf(&sb, "%s:%s -> %s\n", b.HostIP, b.HostPort, containerPort)
+		}
+	}
+	return []byte(sb.String()), nil
 }
 
 func fetchInspect(ctx context.Context, cl *docker.Client, id string) ([]byte, error) {

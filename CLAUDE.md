@@ -15,7 +15,7 @@ dockerfs/
                                 demuxReader, taggedServiceLogReader
     fs/
       root.go                   Root node (/), FS type, routes to /local and /swarm
-      local.go                  /local/containers/<name>/{env,inspect,logs,stdout,stderr,stats}
+      local.go                  /local/containers/<name>/{env,inspect,logs,mounts,network,ports,stdout,stderr,stats}
       swarm.go                  /swarm/services, /swarm/nodes, /swarm/jobs
   go.mod / go.sum
 ```
@@ -100,7 +100,7 @@ fusermount3 -u ~/mnt/dockerfs
 ## What is NOT implemented
 
 - Any writes — fully read-only
-- `/swarm/nodes/<name>/containers/<service.N>/{env,inspect,logs,stdout,stderr,stats,node}` — replicas running on this node
+- `/swarm/nodes/<name>/containers/<service.N>/{env,inspect,logs,mounts,network,node,ports,stdout,stderr,stats}` — replicas running on this node
 - docker secrets
 - mmap
 - caching between Read() calls (except the open stream handle)

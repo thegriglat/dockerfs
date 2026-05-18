@@ -10,6 +10,9 @@ A read-only FUSE filesystem that exposes Docker containers, Swarm services, node
 │           ├── env        KEY=VALUE lines from container environment
 │           ├── inspect    raw JSON from docker inspect
 │           ├── logs       live combined log stream (stdout + stderr)
+│           ├── mounts     source → destination [rw/ro] per line
+│           ├── network    network name → IP address per line
+│           ├── ports      host:port → container port/proto per line
 │           ├── stdout     live stdout stream
 │           ├── stderr     live stderr stream
 │           └── stats      JSON snapshot refreshed on every read
@@ -23,13 +26,16 @@ A read-only FUSE filesystem that exposes Docker containers, Swarm services, node
     │       ├── stderr     stderr only, prefixed [slot]
     │       └── replicas/
     │           └── <name.N>/
-    │               ├── env    KEY=VALUE lines from container environment
+    │               ├── env     KEY=VALUE lines from container environment
     │               ├── inspect raw task JSON
-    │               ├── logs   live combined stream (stdout + stderr)
-    │               ├── stdout live stdout stream
-    │               ├── stderr live stderr stream
-    │               ├── stats
-    │               └── node   hostname of the node running this replica
+    │               ├── logs    live combined stream (stdout + stderr)
+    │               ├── mounts  source → destination [rw/ro] per line
+    │               ├── network network name → IP address per line
+    │               ├── node    hostname of the node running this replica
+    │               ├── ports   host:port → container port/proto per line
+    │               ├── stdout  live stdout stream
+    │               ├── stderr  live stderr stream
+    │               └── stats
     ├── nodes/
     │   └── <hostname>/
     │       ├── inspect    raw node JSON
@@ -40,10 +46,13 @@ A read-only FUSE filesystem that exposes Docker containers, Swarm services, node
     │               ├── env
     │               ├── inspect
     │               ├── logs
+    │               ├── mounts
+    │               ├── network
+    │               ├── node
+    │               ├── ports
     │               ├── stdout
     │               ├── stderr
-    │               ├── stats
-    │               └── node
+    │               └── stats
     └── jobs/
         └── <name>/
             ├── inspect    raw task JSON

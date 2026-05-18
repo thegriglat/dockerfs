@@ -318,10 +318,13 @@ func (d *ReplicaDir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 		{Name: "env", Type: fuse.DT_File},
 		{Name: "inspect", Type: fuse.DT_File},
 		{Name: "logs", Type: fuse.DT_File},
+		{Name: "mounts", Type: fuse.DT_File},
+		{Name: "network", Type: fuse.DT_File},
+		{Name: "node", Type: fuse.DT_File},
+		{Name: "ports", Type: fuse.DT_File},
 		{Name: "stdout", Type: fuse.DT_File},
 		{Name: "stderr", Type: fuse.DT_File},
 		{Name: "stats", Type: fuse.DT_File},
-		{Name: "node", Type: fuse.DT_File},
 	}, nil
 }
 
@@ -345,16 +348,28 @@ func (d *ReplicaDir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 		}}, nil
 	case "logs":
 		return &StreamFile{cl: d.cl, id: cid, stdout: true, stderr: true}, nil
+	case "mounts":
+		return &StaticFile{fetch: func(ctx context.Context) ([]byte, error) {
+			return fetchMounts(ctx, d.cl, cid)
+		}}, nil
+	case "network":
+		return &StaticFile{fetch: func(ctx context.Context) ([]byte, error) {
+			return fetchNetwork(ctx, d.cl, cid)
+		}}, nil
+	case "node":
+		return &StaticFile{fetch: func(ctx context.Context) ([]byte, error) {
+			return fetchNodeName(ctx, d.cl, nodeID)
+		}}, nil
+	case "ports":
+		return &StaticFile{fetch: func(ctx context.Context) ([]byte, error) {
+			return fetchPorts(ctx, d.cl, cid)
+		}}, nil
 	case "stdout":
 		return &StreamFile{cl: d.cl, id: cid, stdout: true, stderr: false}, nil
 	case "stderr":
 		return &StreamFile{cl: d.cl, id: cid, stdout: false, stderr: true}, nil
 	case "stats":
 		return &StatsFile{cl: d.cl, id: cid}, nil
-	case "node":
-		return &StaticFile{fetch: func(ctx context.Context) ([]byte, error) {
-			return fetchNodeName(ctx, d.cl, nodeID)
-		}}, nil
 	}
 	return nil, fuse.ENOENT
 }
